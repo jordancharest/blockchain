@@ -23,7 +23,7 @@ assets = {
 prices = {
     bitcoin  : 49306,
     ethereum  : 3269,
-    chainlink : 26.0, 
+    chainlink : 26.0,
 }
 
 # multiply risk by 10 so we can match keys
@@ -44,16 +44,16 @@ risk_maps = {
         9  : 14580,
     },
     chainlink : {
-        5  : 35.8,
-        6  : 51.1,
-        7  : 70.9,
-        8  : 95.5,
-        9  : 125.4,
+        5  : 51.1,
+        6  : 70.9,
+        7  : 95.5,
+        8  : 125.4,
+        9  : 161.0,
     }
 }
 
 # This is a hand-wavy multiplier that attempts to account for:
-# 1) The price at each risk level will move up by the time we reach it 
+# 1) The price at each risk level will move up by the time we reach it
 # TODO: adjust for the current price!!!! price won't rise as much to the 0.9 risk level
 # when it's currently at 0.8 vs 0.5
 # 2) Since we set stop losses instead of market dumping the instant the risk levels are hit,
@@ -69,26 +69,33 @@ risk_multiplier = {
 }
 
 ###############################################################################
+valid_strategies = ["linear", "ddca"]
 
 class Strategy:
-    def __init__(self, name, start_risk):
+    def __init__(self, name, start_risk, strategy_type):
+        assert strategy_type in valid_strategies, "Invalid strategy"
         self.name = name
         self.start_risk = start_risk
-        self.num_blocks = int(10 - start_risk)
-        self.sell_fraction = range(1, self.num_blocks + 1)
-        self.sell_risk_levels = [i for i in range(start_risk , start_risk + self.num_blocks)]
+        self.num_blocks = 10 - start_risk
+        self.sell_fraction = []
+
+        if strategy_type == "linear":
+            self.sell_fraction = [1] * self.num_blocks
+        elif strategy_type == "ddca":
+            self.sell_fraction = range(1, self.num_blocks + 1)
+
+        self.sell_risk_levels = range(start_risk , start_risk + self.num_blocks)
         self.total_increments = sum(self.sell_fraction)
 
     def __repr__(self):
         return f"""{self.name}
   First Stop Loss: {self.start_risk}
-  Sell Fractions:\n{self._get_sell_fractions_str()}
-  Sell Risk Levels: {self.sell_risk_levels}\n"""
-    
+  Sell Fractions:\n{self._get_sell_fractions_str()}"""
+
     def _get_sell_fractions_str(self):
         # generate a string representing how much of each asset will be sold in each risk band
         blocks = ""
-        tail_risk = self.start_risk        
+        tail_risk = self.start_risk
         head_risk = tail_risk + 1
         total_increments = sum(self.sell_fraction)
         for i in range(self.num_blocks):
@@ -105,13 +112,14 @@ class Strategy:
             risk = self.start_risk
             i = self.start_risk
             for target in self.sell_fraction:
-                row = {"Strategy" : self.name}
-                row["Risk"] = risk
-                row["Proceeds"] = (target / self.total_increments) * holdings * risks[ticker][i] * risk_multiplier[i]
+                row = {'strategy' : self.name}
+                row['risk'] = risk
+                row['proceeds'] = (target / self.total_increments) * holdings * risks[ticker][i] * risk_multiplier[i]
+                row['total'] = 0
                 results.append(row)
                 i += 1
                 risk += 1
-        return results
+        return pd.DataFrame(results)
 
 
 
@@ -122,11 +130,16 @@ if __name__ == "__main__":
     pd.options.display.float_format = "${:,.0f}".format
 
     # build several different strategies
-    conservative = Strategy("Conservative", 5)
-    moderate = Strategy("Moderate", 6)
-    aggressive = Strategy("Aggressive", 7)
-    yolo = Strategy("YOLO", 8)
-    strategies = [conservative, moderate, aggressive, yolo]
+    conservative_linear = Strategy("Conservative Linear", 5, strategy_type="linear")
+    moderate_linear = Strategy("Moderate Linear", 6, strategy_type="linear")
+    aggressive_linear = Strategy("Aggressive Linear", 7, strategy_type="linear")
+    yolo_linear = Strategy("YOLO Linear", 8, strategy_type="linear")
+
+    conservative = Strategy("Conservative DDCA", 5, strategy_type="ddca")
+    moderate = Strategy("Moderate DDCA", 6, strategy_type="ddca")
+    aggressive = Strategy("Aggressive DDCA", 7, strategy_type="ddca")
+    yolo = Strategy("YOLO DDCA", 8, strategy_type="ddca")
+    strategies = [conservative_linear, moderate_linear, aggressive_linear, yolo_linear, conservative, moderate, aggressive, yolo]
 
 
     all_results = pd.DataFrame()
@@ -135,26 +148,33 @@ if __name__ == "__main__":
     print("Summary:\n")
     for strategy in strategies:
         print(strategy)
-        strategy_results = strategy.run(assets, risk_maps)
-        df_results = pd.DataFrame(strategy_results)
-        all_results = all_results.append(df_results, ignore_index=True)
-        print(df_results.to_string(index=False))
+        results = strategy.run(assets, risk_maps)
+        results['total'] = results.loc[results.strategy == strategy.name, 'proceeds'].sum()
 
-        print(f"\n Total: ${df_results.loc[df_results['Strategy'] == strategy.name, 'Proceeds'].sum():,.0f}\n\n")
+        print(results.to_string(index=False))
+        print(f"\n Total: ${results.loc[results.strategy == strategy.name, 'proceeds'].sum():,.0f}\n\n")
+
+        all_results = all_results.append(results, ignore_index=True)
 
     # aggregate by strategy and risk level
     # TODO: can we still aggregate but group by asset as well?
     print(f"All results:\n{all_results}")
-    all_results['Proceeds'] = all_results['Proceeds'].round(decimals = 2)
-    all_results = all_results.groupby(['Strategy', 'Risk'], sort=False)['Proceeds'].sum().reset_index()
-    print(f"\nAggregated\n{all_results}")
+    all_results = all_results.groupby(['strategy', 'risk', 'total'], sort=False).proceeds.sum().reset_index()
+    all_results.proceeds = all_results['proceeds'].round(decimals = 2)
+
+    # sort by total proceeds
+    print(type(all_results))
+    print(all_results)
+    all_results = all_results.sort_values(['total', 'risk'])
+
+    print(f"\nAggregated and Sorted:\n{all_results}")
 
 
-    #plot
-    fig = px.bar(all_results, x="Strategy",
-                              y="Proceeds",
-                              color="Risk",
-                              title="Visaulizing Dynamic DCA",
+    # plot
+    fig = px.bar(all_results, x="strategy",
+                              y="proceeds",
+                              color="risk",
+                              title="Visualizing Sell Strategies",
                               color_continuous_scale=px.colors.diverging.Temps,
                               color_continuous_midpoint=7)
     fig.show()
