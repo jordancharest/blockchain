@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.express as px
 
 # How to use this script:
-# python3 dynamic_dca.py
+# python3 sell_strategy.py
 
 bitcoin = "BTC"
 ethereum = "ETH"
