@@ -1,0 +1,22 @@
+# steps to create a raw transaction using the bitcoin core console
+
+# see all your UTXOs
+listunspent
+
+# see details about a specific transaction
+gettxout <transaction hash>
+
+# create a transaction
+createrawtransaction '[{"txid":"703f7d89e518dc5fad48ebfc95dbd4c35230a1f860185268af91f2115cbee8cf","vout": 0}]' '{"tb1q95y5ccurjaz6wqpanjyup6wksj3zsclmnxtwfu":0.000095, "tb1qla6c64x96a8lnfmt4uu9c3vhwyqjhy0ftt904s":0}'
+
+# view details about raw transaction that you jus created
+decoderawtransaction <raw transaction hex>
+
+# sign the transaction
+signrawtransactionwithwallet <raw transaction hex>
+
+# send the transaction
+sendrawtransaction <signed hex value>
+
+# query the resulting transaction ID and view details
+gettransaction <txid>
